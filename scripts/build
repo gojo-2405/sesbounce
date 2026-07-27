@@ -4,6 +4,10 @@ ECR_REPO=618246140803.dkr.ecr.eu-north-1.amazonaws.com/sesbounce
 AWS_REGION=eu-north-1
 AWS_PROFILE=test-admin
 DOCKER_BUILD_TAG=$GIT_BRANCH-${BUILD_NUMBER}
+
+# Severities that should block the deploy. Adjust as needed (e.g. add MEDIUM).
+FAIL_ON_SEVERITIES="CRITICAL HIGH"
+
 docker build -t $ECR_REPO:$DOCKER_BUILD_TAG --pull=true .
 if [ $? -eq 0 ]; then
   echo "Docker build got success"
@@ -18,20 +22,15 @@ aws ecr get-login-password \
 docker login \
   --username AWS \
   --password-stdin ${ECR_REPO}
-
 if [ $? -ne 0 ]; then
   echo "ECR login failed"
   exit 1
 fi
-
 IMAGE_ID=$(docker images -q $ECR_REPO | awk "NR==1{print \$1}")
 echo $IMAGE_ID
-
 docker tag $IMAGE_ID $ECR_REPO:latest
 docker inspect $IMAGE_ID
-
 docker push $ECR_REPO:$DOCKER_BUILD_TAG && docker push $ECR_REPO:latest
-
 if [ $? -eq 0 ]; then
   echo "Docker Push got success"
   docker logout $ECR_REPO
@@ -40,26 +39,57 @@ else
   docker logout $ECR_REPO
   exit 1
 fi
+
+# ---- ECR vulnerability scan gate ----
+# scanOnPush is already enabled on this repo, so the push above already
+# triggered a scan. We just wait for it and check the results.
+scanImage
 }
 
+scanImage()
+{
+REPO_NAME=$(basename $ECR_REPO)
 
-if [ "$GIT_BRANCH" = "master-migration" ];
-then 
-aws s3 cp s3://tfw-operations/config/prod-tfw-admin-web/.env . --profile tfw-new 
-startBuild
-elif [ "$GIT_BRANCH" = "preprod" ];
+echo "Waiting for ECR scan to complete for ${REPO_NAME}:${DOCKER_BUILD_TAG} ..."
+aws ecr wait image-scan-complete \
+  --repository-name ${REPO_NAME} \
+  --image-id imageTag=${DOCKER_BUILD_TAG} \
+  --region ${AWS_REGION} --profile ${AWS_PROFILE}
+
+if [ $? -ne 0 ]; then
+  echo "ECR scan did not complete (timed out or failed to start). Blocking deploy."
+  exit 1
+fi
+
+FINDINGS_JSON=$(aws ecr describe-image-scan-findings \
+  --repository-name ${REPO_NAME} \
+  --image-id imageTag=${DOCKER_BUILD_TAG} \
+  --region ${AWS_REGION} --profile ${AWS_PROFILE} \
+  --output json)
+
+echo "$FINDINGS_JSON" | jq '.imageScanFindings.findingSeverityCounts'
+
+BLOCK=0
+for SEV in $FAIL_ON_SEVERITIES; do
+  COUNT=$(echo "$FINDINGS_JSON" | jq --arg SEV "$SEV" '.imageScanFindings.findingSeverityCounts[$SEV] // 0')
+  echo "${SEV}: ${COUNT}"
+  if [ "$COUNT" -gt 0 ]; then
+    BLOCK=1
+  fi
+done
+
+if [ "$BLOCK" -eq 1 ]; then
+  echo "Vulnerabilities found at or above the configured severity threshold (${FAIL_ON_SEVERITIES})."
+  echo "Blocking deploy."
+  exit 1
+else
+  echo "No vulnerabilities found at ${FAIL_ON_SEVERITIES} severity. Safe to deploy."
+fi
+}
+
+if [ "$GIT_BRANCH" = "main" ];
 then
-aws s3 cp s3://kaaylabs-operations-new/config/adfarm-tfw-web/preprod/.env . --profile new-kaaylabs
-startBuild
-elif [ "$GIT_BRANCH" = "main" ];
-then
-#aws s3 cp s3://kaaylabs-operations-new/config/adfarm-tfw-web/master/.env . --profile new-kaaylabs
-startBuild
-elif [ "$GIT_BRANCH" = "master-v2" ];
-then
-aws s3 cp s3://kaaylabs-operations/kl-forms/web/.env .
 startBuild
 else
 echo "Skipping a build process because this branch is not permitted for build: ${GIT_BRANCH}"
 fi
-

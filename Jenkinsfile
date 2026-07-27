@@ -14,13 +14,13 @@ pipeline {
                 // and exits 1 if CRITICAL/HIGH vulnerabilities are found.
                 // A non-zero exit here fails this stage and Jenkins will not
                 // proceed to the Deploy stage below.
-                sh 'chmod +x /scripts/build.sh && /scripts/build.sh'
+                sh 'chmod +x /scripts/build && /scripts/build'
             }
         }
 
         stage('Deploy') {
             steps {
-                sh 'chmod +x /scripts/deploy.sh && /scripts/deploy.sh'
+                sh 'chmod +x /scripts/deploy && /scripts/deploy'
             }
         }
     }

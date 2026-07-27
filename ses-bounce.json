@@ -1,9 +1,9 @@
 
 {
-	"family": "adfarm-tfw-web",
+	"family": "ses-bounce",
 	"taskRoleArn": "arn:aws:iam::618246140803:role/SSMPermissionTask",
 	"containerDefinitions": [{
-		"name": "adfarm-tfw-web",
+		"name": "ses-bounce",
 		"image": "618246140803.dkr.ecr.eu-north-1.amazonaws.com/sesbounce:GIT_COMMIT",
 		"cpu": 300,
 		"memory": 300,
@@ -20,7 +20,7 @@
         "options": {
           "awslogs-group": "GROUP_NAME",
           "awslogs-region": "us-east-1",
-          "awslogs-stream-prefix": "adfarm-tfw-web"
+          "awslogs-stream-prefix": "ses-bounce"
         }
       },
       "environment": [],

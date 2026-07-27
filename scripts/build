@@ -1,0 +1,65 @@
+startBuild()
+{
+ECR_REPO=618246140803.dkr.ecr.eu-north-1.amazonaws.com/sesbounce
+AWS_REGION=eu-north-1
+AWS_PROFILE=test-admin
+DOCKER_BUILD_TAG=$GIT_BRANCH-${BUILD_NUMBER}
+docker build -t $ECR_REPO:$DOCKER_BUILD_TAG --pull=true .
+if [ $? -eq 0 ]; then
+  echo "Docker build got success"
+else
+  echo "Docker build was failed"
+  exit 1
+fi
+docker images -q $ECR_REPO
+aws ecr get-login-password \
+  --region ${AWS_REGION} \
+  --profile ${AWS_PROFILE} | \
+docker login \
+  --username AWS \
+  --password-stdin ${ECR_REPO}
+
+if [ $? -ne 0 ]; then
+  echo "ECR login failed"
+  exit 1
+fi
+
+IMAGE_ID=$(docker images -q $ECR_REPO | awk "NR==1{print \$1}")
+echo $IMAGE_ID
+
+docker tag $IMAGE_ID $ECR_REPO:latest
+docker inspect $IMAGE_ID
+
+docker push $ECR_REPO:$DOCKER_BUILD_TAG && docker push $ECR_REPO:latest
+
+if [ $? -eq 0 ]; then
+  echo "Docker Push got success"
+  docker logout $ECR_REPO
+else
+  echo "Docker Push was failed"
+  docker logout $ECR_REPO
+  exit 1
+fi
+}
+
+
+if [ "$GIT_BRANCH" = "master-migration" ];
+then 
+aws s3 cp s3://tfw-operations/config/prod-tfw-admin-web/.env . --profile tfw-new 
+startBuild
+elif [ "$GIT_BRANCH" = "preprod" ];
+then
+aws s3 cp s3://kaaylabs-operations-new/config/adfarm-tfw-web/preprod/.env . --profile new-kaaylabs
+startBuild
+elif [ "$GIT_BRANCH" = "main" ];
+then
+#aws s3 cp s3://kaaylabs-operations-new/config/adfarm-tfw-web/master/.env . --profile new-kaaylabs
+startBuild
+elif [ "$GIT_BRANCH" = "master-v2" ];
+then
+aws s3 cp s3://kaaylabs-operations/kl-forms/web/.env .
+startBuild
+else
+echo "Skipping a build process because this branch is not permitted for build: ${GIT_BRANCH}"
+fi
+

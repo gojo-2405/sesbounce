@@ -1,0 +1,30 @@
+
+{
+	"family": "adfarm-tfw-web",
+	"taskRoleArn": "arn:aws:iam::618246140803:role/SSMPermissionTask",
+	"containerDefinitions": [{
+		"name": "adfarm-tfw-web",
+		"image": "618246140803.dkr.ecr.eu-north-1.amazonaws.com/sesbounce:GIT_COMMIT",
+		"cpu": 300,
+		"memory": 300,
+		"memoryReservation": 300,
+		"volumesFrom": [],
+		"portMappings": [{
+			"hostPort": 0,
+			"containerPort": 3000,
+			"protocol": "tcp"
+		}],
+		"essential": true,
+        "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "GROUP_NAME",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "adfarm-tfw-web"
+        }
+      },
+      "environment": [],
+      "mountPoints": []
+    }
+  ]
+}

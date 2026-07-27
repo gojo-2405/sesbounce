@@ -1,0 +1,18 @@
+{
+  "name": "ses-bounce-tracker",
+  "version": "1.0.0",
+  "description": "Send emails via SES SMTP and track bounces/complaints via an SNS -> Lambda -> API webhook",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "nodemailer": "^6.9.14",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5",
+    "nanoid": "^5.0.7"
+  }
+}

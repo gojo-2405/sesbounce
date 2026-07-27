@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Delivery desk — SES bounce tracker</title>
+<style>
+  :root {
+    --paper: #F6F4EF;
+    --panel: #FFFFFF;
+    --ink: #22241F;
+    --ink-soft: #5B5D54;
+    --line: #DEDACD;
+    --stamp-red: #B23A2E;
+    --stamp-red-bg: #F7E7E3;
+    --ok-green: #2F6B3E;
+    --ok-green-bg: #E7F1E5;
+    --wait-amber: #96650F;
+    --wait-amber-bg: #FBEEDA;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    padding: 40px 24px 80px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  header { margin-bottom: 32px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok-green); display: inline-block; }
+  .dot.off { background: var(--stamp-red); }
+  h1 {
+    font-size: 30px;
+    font-weight: 700;
+    margin: 8px 0 6px;
+    letter-spacing: -0.01em;
+  }
+  .sub { color: var(--ink-soft); font-size: 15px; max-width: 60ch; line-height: 1.5; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-family: var(--mono);
+    color: var(--ink-soft);
+    margin: 0 0 18px;
+    font-weight: 600;
+  }
+
+  form { display: grid; gap: 14px; }
+  label { font-size: 13px; color: var(--ink-soft); display: block; margin-bottom: 5px; }
+  input, textarea {
+    width: 100%;
+    font-family: var(--sans);
+    font-size: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  input:focus, textarea:focus, button:focus-visible {
+    outline: 2px solid var(--ink);
+    outline-offset: 1px;
+  }
+  textarea { min-height: 90px; resize: vertical; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  button {
+    justify-self: start;
+    background: var(--ink);
+    color: var(--paper);
+    border: none;
+    padding: 11px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  button:hover { background: #3a3d34; }
+  button:disabled { opacity: 0.5; cursor: default; }
+
+  .status-msg { font-size: 13px; margin-top: 4px; min-height: 18px; }
+  .status-msg.ok { color: var(--ok-green); }
+  .status-msg.err { color: var(--stamp-red); }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ink-soft);
+    font-weight: 600;
+    padding: 0 10px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  td {
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  .to-cell { font-family: var(--mono); font-size: 13px; }
+  .subj-cell { color: var(--ink-soft); }
+
+  .pill {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-weight: 600;
+  }
+  .pill.sent { background: #EDEBE3; color: var(--ink-soft); }
+  .pill.delivered { background: var(--ok-green-bg); color: var(--ok-green); }
+  .pill.bounce { background: var(--stamp-red-bg); color: var(--stamp-red); }
+  .pill.complaint { background: var(--wait-amber-bg); color: var(--wait-amber); }
+  .pill.rejected { background: var(--stamp-red-bg); color: var(--stamp-red); }
+  .pill.delayed { background: var(--wait-amber-bg); color: var(--wait-amber); }
+
+  .empty { color: var(--ink-soft); font-size: 14px; text-align: center; padding: 30px 0; }
+  .refresh-line {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;
+  }
+  .refresh-line button.ghost {
+    background: none; color: var(--ink-soft); border: 1px solid var(--line); padding: 6px 12px; font-size: 12px; font-weight: 500;
+  }
+  .refresh-line button.ghost:hover { background: var(--paper); color: var(--ink); }
+
+  .detail { font-family: var(--mono); font-size: 12px; color: var(--ink-soft); margin-top: 4px; white-space: pre-wrap; }
+
+  tr.email-row { cursor: pointer; }
+  tr.email-row:hover td { background: #FBFAF6; }
+
+  .viewer {
+    position: fixed;
+    inset: 0;
+    background: var(--paper);
+    z-index: 100;
+    display: none;
+    overflow-y: auto;
+  }
+  .viewer.open { display: block; }
+  .viewer-inner { max-width: 720px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  .viewer-topbar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .back-btn {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    width: 36px;
+    height: 36px;
+    border-radius: 3px;
+    padding: 0;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    justify-self: unset;
+  }
+  .back-btn:hover { background: var(--panel); }
+
+  .viewer-subject {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 18px;
+  }
+
+  .viewer-meta {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 16px 18px;
+    margin-bottom: 22px;
+    font-size: 13px;
+  }
+  .viewer-meta-row {
+    display: flex;
+    gap: 10px;
+    padding: 5px 0;
+  }
+  .viewer-meta-row .k {
+    color: var(--ink-soft);
+    width: 90px;
+    flex-shrink: 0;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-top: 2px;
+  }
+  .viewer-meta-row .v { font-family: var(--mono); font-size: 13px; }
+
+  .viewer-body {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 22px;
+    font-size: 15px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    margin-bottom: 26px;
+  }
+
+  .timeline h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-family: var(--mono);
+    color: var(--ink-soft);
+    margin: 0 0 14px;
+    font-weight: 600;
+  }
+  .timeline-item {
+    display: flex;
+    gap: 14px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .timeline-item:last-child { border-bottom: none; }
+  .timeline-dot-wrap {
+    width: 10px;
+    display: flex;
+    justify-content: center;
+    padding-top: 5px;
+    flex-shrink: 0;
+  }
+  .timeline-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .timeline-content { flex: 1; }
+  .timeline-title { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+  .timeline-time { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); margin-bottom: 6px; }
+  .timeline-diag {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-soft);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 8px 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow"><span class="dot off" id="status-dot"></span><span id="status-text">checking configuration…</span></div>
+    <h1>Delivery desk</h1>
+    <div class="sub">Send a test email through your SES SMTP credentials, then watch here as bounce or complaint events arrive back through the SNS → Lambda → webhook pipeline.</div>
+  </header>
+
+  <div class="panel">
+    <h2>Send a test email</h2>
+    <form id="send-form">
+      <div>
+        <label for="to">To</label>
+        <input type="email" id="to" name="to" placeholder="bounce@simulator.amazonses.com" required>
+      </div>
+      <div class="row2">
+        <div>
+          <label for="subject">Subject</label>
+          <input type="text" id="subject" name="subject" placeholder="Test send" required>
+        </div>
+      </div>
+      <div>
+        <label for="message">Message</label>
+        <textarea id="message" name="message" placeholder="This is a test email from the delivery desk." required></textarea>
+      </div>
+      <button type="submit" id="send-btn">Send email</button>
+      <div class="status-msg" id="send-status"></div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="refresh-line">
+      <h2 style="margin:0">Sent mail log</h2>
+      <button class="ghost" id="refresh-btn">Refresh</button>
+    </div>
+    <div id="table-holder"><div class="empty">No emails sent yet.</div></div>
+  </div>
+
+</div>
+
+<div class="viewer" id="viewer">
+  <div class="viewer-inner" id="viewer-content"></div>
+</div>
+
+<script>
+const API = '';
+let emailsCache = [];
+
+async function checkHealth() {
+  try {
+    const res = await fetch(`${API}/api/health`);
+    const data = await res.json();
+    const dot = document.getElementById('status-dot');
+    const text = document.getElementById('status-text');
+    if (data.sesConfigured) {
+      dot.classList.remove('off');
+      text.textContent = 'SES SMTP configured';
+    } else {
+      dot.classList.add('off');
+      text.textContent = 'SES SMTP not configured — fill in .env and restart the server';
+    }
+  } catch (e) {
+    document.getElementById('status-text').textContent = 'Cannot reach server';
+  }
+}
+
+function pill(status) {
+  const labels = { sent: 'sent', delivered: 'delivered', bounce: 'bounced', complaint: 'complaint', delayed: 'delayed', rejected: 'rejected' };
+  return `<span class="pill ${status}">${labels[status] || status}</span>`;
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString();
+}
+
+function renderEvents(email) {
+  if (!email.events || email.events.length === 0) return '';
+  const last = email.events[email.events.length - 1];
+  let extra = '';
+  if (last.detail?.recipients?.[0]?.diagnosticCode) {
+    extra = last.detail.recipients[0].diagnosticCode;
+  } else if (last.detail?.bounceSubType) {
+    extra = `${last.detail.bounceType} / ${last.detail.bounceSubType}`;
+  }
+  return extra ? `<div class="detail">${extra}</div>` : '';
+}
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function loadEmails() {
+  const res = await fetch(`${API}/api/emails`);
+  const data = await res.json();
+  emailsCache = data.emails || [];
+  const holder = document.getElementById('table-holder');
+
+  if (emailsCache.length === 0) {
+    holder.innerHTML = '<div class="empty">No emails sent yet.</div>';
+    return;
+  }
+
+  const rows = emailsCache.map(e => `
+    <tr class="email-row" data-id="${escapeHtml(e.id)}">
+      <td class="to-cell">${escapeHtml(e.to)}</td>
+      <td class="subj-cell">${escapeHtml(e.subject)}${renderEvents(e)}</td>
+      <td>${pill(e.status)}</td>
+      <td>${fmtTime(e.sentAt)}</td>
+      <td>${fmtTime(e.updatedAt)}</td>
+    </tr>
+  `).join('');
+
+  holder.innerHTML = `
+    <table>
+      <thead>
+        <tr><th>Recipient</th><th>Subject</th><th>Status</th><th>Sent</th><th>Updated</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+
+  holder.querySelectorAll('tr.email-row').forEach(row => {
+    row.addEventListener('click', () => openViewer(row.dataset.id));
+  });
+}
+
+const EVENT_LABELS = {
+  sent: 'Sent',
+  delivered: 'Delivered',
+  bounce: 'Bounced',
+  complaint: 'Marked as spam',
+  delayed: 'Delivery delayed',
+  rejected: 'Rejected by SES',
+};
+
+const EVENT_DOT_COLOR = {
+  delivered: 'var(--ok-green)',
+  bounce: 'var(--stamp-red)',
+  complaint: 'var(--wait-amber)',
+  delayed: 'var(--wait-amber)',
+  rejected: 'var(--stamp-red)',
+};
+
+function diagnosticLine(ev) {
+  const d = ev.detail;
+  if (!d) return '';
+  if (d.recipients?.[0]?.diagnosticCode) return d.recipients[0].diagnosticCode;
+  if (d.bounceType) return `${d.bounceType} / ${d.bounceSubType || ''}`.trim();
+  if (d.complaintFeedbackType) return `Feedback type: ${d.complaintFeedbackType}`;
+  if (d.delayType) return `Delay type: ${d.delayType}`;
+  if (d.reason) return `Reason: ${d.reason}`;
+  return '';
+}
+
+function openViewer(id) {
+  const email = emailsCache.find(e => e.id === id);
+  if (!email) return;
+
+  const timelineItems = [
+    { type: 'sent', at: email.sentAt, detail: null },
+    ...(email.events || []),
+  ];
+
+  const timelineHtml = timelineItems.map(ev => {
+    const label = EVENT_LABELS[ev.type] || ev.type;
+    const dotColor = EVENT_DOT_COLOR[ev.type] || 'var(--ink-soft)';
+    const diag = diagnosticLine(ev);
+    return `
+      <div class="timeline-item">
+        <div class="timeline-dot-wrap"><div class="timeline-dot" style="background:${dotColor}"></div></div>
+        <div class="timeline-content">
+          <div class="timeline-title">${escapeHtml(label)}</div>
+          <div class="timeline-time">${fmtTime(ev.at)}</div>
+          ${diag ? `<div class="timeline-diag">${escapeHtml(diag)}</div>` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('viewer-content').innerHTML = `
+    <div class="viewer-topbar">
+      <button class="back-btn" id="viewer-back" aria-label="Back">←</button>
+      ${pill(email.status)}
+    </div>
+    <h2 class="viewer-subject">${escapeHtml(email.subject)}</h2>
+    <div class="viewer-meta">
+      <div class="viewer-meta-row"><div class="k">To</div><div class="v">${escapeHtml(email.to)}</div></div>
+      <div class="viewer-meta-row"><div class="k">Sent</div><div class="v">${fmtTime(email.sentAt)}</div></div>
+      <div class="viewer-meta-row"><div class="k">Updated</div><div class="v">${fmtTime(email.updatedAt)}</div></div>
+      <div class="viewer-meta-row"><div class="k">Message ID</div><div class="v">${escapeHtml(email.sesMessageId || '—')}</div></div>
+    </div>
+    <div class="viewer-body">${escapeHtml(email.message) || '(no message body stored)'}</div>
+    <div class="timeline">
+      <h3>Delivery timeline</h3>
+      ${timelineHtml}
+    </div>
+  `;
+
+  document.getElementById('viewer-back').addEventListener('click', closeViewer);
+  document.getElementById('viewer').classList.add('open');
+}
+
+function closeViewer() {
+  document.getElementById('viewer').classList.remove('open');
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeViewer();
+});
+
+document.getElementById('send-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const btn = document.getElementById('send-btn');
+  const statusEl = document.getElementById('send-status');
+  btn.disabled = true;
+  statusEl.textContent = '';
+  statusEl.className = 'status-msg';
+
+  const to = document.getElementById('to').value;
+  const subject = document.getElementById('subject').value;
+  const message = document.getElementById('message').value;
+
+  try {
+    const res = await fetch(`${API}/api/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, message }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Send failed');
+
+    statusEl.textContent = `Sent. SES message ID: ${data.sesMessageId}`;
+    statusEl.classList.add('ok');
+    document.getElementById('send-form').reset();
+    loadEmails();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.classList.add('err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('refresh-btn').addEventListener('click', loadEmails);
+
+checkHealth();
+loadEmails();
+setInterval(loadEmails, 8000);
+</script>
+</body>
+</html>

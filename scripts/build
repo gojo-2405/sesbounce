@@ -6,7 +6,7 @@ AWS_PROFILE=test-admin
 DOCKER_BUILD_TAG=$GIT_BRANCH-${BUILD_NUMBER}
 
 # Severities that should block the deploy. Adjust as needed (e.g. add MEDIUM).
-FAIL_ON_SEVERITIES="EXTREME"
+FAIL_ON_SEVERITIES="CRITICAL HIGH"
 
 docker build -t $ECR_REPO:$DOCKER_BUILD_TAG --pull=true .
 if [ $? -eq 0 ]; then

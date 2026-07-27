@@ -8,7 +8,7 @@ DOCKER_BUILD_TAG=$GIT_BRANCH-${BUILD_NUMBER}
 # Severities that should block the deploy. Adjust as needed (e.g. add MEDIUM).
 FAIL_ON_SEVERITIES="CRITICAL HIGH"
 
-DOCKER_BUILDKIT=0 docker build -t $ECR_REPO:$DOCKER_BUILD_TAG --pull=true .
+docker build -t $ECR_REPO:$DOCKER_BUILD_TAG --pull=true .
 if [ $? -eq 0 ]; then
   echo "Docker build got success"
 else
@@ -49,15 +49,35 @@ scanImage
 scanImage()
 {
 REPO_NAME=$(basename $ECR_REPO)
+MAX_WAIT=180   # total seconds to wait for the scan to start + complete
+INTERVAL=5     # seconds between polls
 
-echo "Waiting for ECR scan to complete for ${REPO_NAME}:${DOCKER_BUILD_TAG} ..."
-aws ecr wait image-scan-complete \
-  --repository-name ${REPO_NAME} \
-  --image-id imageTag=${DOCKER_BUILD_TAG} \
-  --region ${AWS_REGION} --profile ${AWS_PROFILE}
+echo "Waiting for ECR scan to start and complete for ${REPO_NAME}:${DOCKER_BUILD_TAG} ..."
+ELAPSED=0
+SCAN_STATUS=""
 
-if [ $? -ne 0 ]; then
-  echo "ECR scan did not complete (timed out or failed to start). Blocking deploy."
+while [ $ELAPSED -lt $MAX_WAIT ]; do
+  SCAN_STATUS=$(aws ecr describe-image-scan-findings \
+    --repository-name ${REPO_NAME} \
+    --image-id imageTag=${DOCKER_BUILD_TAG} \
+    --region ${AWS_REGION} --profile ${AWS_PROFILE} \
+    --query 'imageScanStatus.status' --output text 2>/dev/null)
+
+  if [ "$SCAN_STATUS" = "COMPLETE" ]; then
+    echo "Scan complete."
+    break
+  elif [ "$SCAN_STATUS" = "FAILED" ]; then
+    echo "ECR scan failed to run. Blocking deploy."
+    exit 1
+  else
+    echo "Scan status: ${SCAN_STATUS:-not started yet}, waiting ${INTERVAL}s... (${ELAPSED}s/${MAX_WAIT}s)"
+    sleep $INTERVAL
+    ELAPSED=$((ELAPSED + INTERVAL))
+  fi
+done
+
+if [ "$SCAN_STATUS" != "COMPLETE" ]; then
+  echo "Timed out waiting for ECR scan to complete after ${MAX_WAIT}s. Blocking deploy."
   exit 1
 fi
 

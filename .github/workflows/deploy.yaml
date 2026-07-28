@@ -151,7 +151,7 @@ jobs:
   # ---------------------------------------------------------------
   # STAGE 3: Deploy — only runs if Scan job succeeded
   # ---------------------------------------------------------------
- deploy:
+  deploy:
     name: Deploy
     needs: [build-and-push, scan]
     runs-on: ubuntu-latest

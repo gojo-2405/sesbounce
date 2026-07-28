@@ -65,7 +65,7 @@ export const handler = async (event) => {
       payload = {
         type: 'delivery_delay',
         messageId: mail.messageId,
-        delayType: delay.delayType, // e.g. MailboxFull, MessageExpired
+        delayType: delay.delayType,
         timestamp: delay.timestamp,
         recipients: (delay.delayedRecipients || []).map((r) => ({
           email: r.emailAddress,
@@ -77,7 +77,7 @@ export const handler = async (event) => {
       payload = {
         type: 'reject',
         messageId: mail.messageId,
-        reason: reject.reason, // e.g. "Bad content"
+        reason: reject.reason,
         recipients: (mail.destination || []).map((email) => ({ email })),
       };
     } else {
@@ -100,7 +100,7 @@ export const handler = async (event) => {
       }
     } catch (err) {
       console.error('Failed to forward event to app:', err);
-      throw err; // let Lambda retry per its retry policy
+      throw err;
     }
   }
 

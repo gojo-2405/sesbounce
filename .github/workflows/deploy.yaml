@@ -1,0 +1,149 @@
+name: Build, Scan & Deploy
+
+on:
+  push:
+    branches: [main]
+
+# Required for OIDC — lets this workflow request a short-lived AWS token
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  ECR_REPOSITORY: sesbounce
+  ECS_CLUSTER: dev
+  ECS_SERVICE: ses-bounce-service
+  ECS_TASK_FAMILY: ses-bounce
+  FAIL_ON_SEVERITIES: "CRITICAL HIGH"
+
+jobs:
+  build-push-scan:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        id: vars
+        run: echo "image_tag=${GITHUB_REF_NAME}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      # No AWS keys stored anywhere — this exchanges GitHub's OIDC token
+      # for short-lived AWS credentials scoped to the role above.
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          # DOCKER_BUILDKIT=0 avoids OCI image-index manifests, which
+          # Amazon ECR's scanner cannot process (see containerd note below).
+          DOCKER_BUILDKIT=0 docker build \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            --pull .
+
+      - name: Push image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Wait for ECR scan and check findings
+        env:
+          IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
+        run: |
+          MAX_WAIT=180
+          INTERVAL=5
+          ELAPSED=0
+          SCAN_STATUS=""
+
+          echo "Waiting for ECR scan on $ECR_REPOSITORY:$IMAGE_TAG ..."
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            SCAN_STATUS=$(aws ecr describe-image-scan-findings \
+              --repository-name "$ECR_REPOSITORY" \
+              --image-id imageTag="$IMAGE_TAG" \
+              --region "$AWS_REGION" \
+              --query 'imageScanStatus.status' --output text 2>/dev/null)
+
+            if [ "$SCAN_STATUS" = "COMPLETE" ]; then
+              echo "Scan complete."
+              break
+            elif [ "$SCAN_STATUS" = "FAILED" ]; then
+              echo "ECR scan failed to run. Blocking deploy."
+              exit 1
+            else
+              echo "Scan status: ${SCAN_STATUS:-not started yet}, waiting ${INTERVAL}s... (${ELAPSED}s/${MAX_WAIT}s)"
+              sleep $INTERVAL
+              ELAPSED=$((ELAPSED + INTERVAL))
+            fi
+          done
+
+          if [ "$SCAN_STATUS" != "COMPLETE" ]; then
+            echo "Timed out waiting for ECR scan to complete. Blocking deploy."
+            exit 1
+          fi
+
+          FINDINGS_JSON=$(aws ecr describe-image-scan-findings \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-id imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" --output json)
+
+          echo "$FINDINGS_JSON" | jq '.imageScanFindings.findingSeverityCounts'
+
+          BLOCK=0
+          for SEV in $FAIL_ON_SEVERITIES; do
+            COUNT=$(echo "$FINDINGS_JSON" | jq --arg SEV "$SEV" '.imageScanFindings.findingSeverityCounts[$SEV] // 0')
+            echo "${SEV}: ${COUNT}"
+            if [ "$COUNT" -gt 0 ]; then
+              BLOCK=1
+            fi
+          done
+
+          if [ "$BLOCK" -eq 1 ]; then
+            echo "Vulnerabilities found at or above threshold (${FAIL_ON_SEVERITIES}). Blocking deploy."
+            exit 1
+          else
+            echo "No vulnerabilities found at ${FAIL_ON_SEVERITIES} severity. Safe to deploy."
+          fi
+
+  deploy:
+    needs: build-push-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to ECS
+        env:
+          IMAGE_TAG: ${{ needs.build-push-scan.outputs.image_tag }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION"
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "$AWS_REGION"

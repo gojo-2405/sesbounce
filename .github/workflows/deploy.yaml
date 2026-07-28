@@ -151,10 +151,11 @@ jobs:
   # ---------------------------------------------------------------
   # STAGE 3: Deploy — only runs if Scan job succeeded
   # ---------------------------------------------------------------
-  deploy:
+ deploy:
     name: Deploy
     needs: [build-and-push, scan]
     runs-on: ubuntu-latest
+
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -167,13 +168,58 @@ jobs:
         env:
           IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
         run: |
+          set -e
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+          IMAGE_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}:${IMAGE_TAG}"
+
+          echo "Using image: $IMAGE_URI"
+
+          echo "Getting latest task definition..."
+
+          aws ecs describe-task-definition \
+            --task-definition "$ECS_TASK_FAMILY" \
+            --query taskDefinition \
+            --output json > task-definition.json
+
+          echo "Updating image in task definition..."
+
+          jq --arg IMAGE "$IMAGE_URI" '
+            .containerDefinitions[0].image=$IMAGE |
+            del(
+              .taskDefinitionArn,
+              .revision,
+              .status,
+              .requiresAttributes,
+              .compatibilities,
+              .registeredAt,
+              .registeredBy
+            )
+          ' task-definition.json > new-task-definition.json
+
+          echo "Registering new task definition revision..."
+
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://new-task-definition.json \
+            --query "taskDefinition.taskDefinitionArn" \
+            --output text)
+
+          echo "New Task Definition: $TASK_DEF_ARN"
+
+          echo "Updating ECS service..."
+
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$ECS_SERVICE" \
-            --force-new-deployment \
+            --task-definition "$TASK_DEF_ARN" \
             --region "$AWS_REGION"
+
+          echo "Waiting for deployment to complete..."
 
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
             --services "$ECS_SERVICE" \
             --region "$AWS_REGION"
+
+          echo "Deployment completed successfully."

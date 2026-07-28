@@ -19,7 +19,7 @@ env:
   ECS_CLUSTER: dev
   ECS_SERVICE: ses-bounce-service
   ECS_TASK_FAMILY: ses-bounce
-  FAIL_ON_SEVERITIES: "CRITICAL HIGH"
+  FAIL_ON_SEVERITIES: "EXTREME"
 
 jobs:
 

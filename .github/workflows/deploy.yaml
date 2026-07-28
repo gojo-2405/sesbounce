@@ -19,7 +19,7 @@ env:
   ECS_CLUSTER: dev
   ECS_SERVICE: ses-bounce-service
   ECS_TASK_FAMILY: ses-bounce
-  FAIL_ON_SEVERITIES: "EXTREME"
+  FAIL_ON_SEVERITIES: "CRITICAL HIGH"
 
 jobs:
 
@@ -131,6 +131,38 @@ jobs:
           fi
 
           echo "$FINDINGS_JSON" | jq '.imageScanFindings.findingSeverityCounts'
+
+          echo ""
+          echo "=== Vulnerability Details ==="
+          echo "$FINDINGS_JSON" | jq -r '
+            ["SEVERITY","CVE","PACKAGE","INSTALLED","FIXED_IN","REFERENCE"],
+            (.imageScanFindings.findings[]? |
+              [
+                .severity,
+                .name,
+                (.attributes[]? | select(.key=="package_name") | .value) // "-",
+                (.attributes[]? | select(.key=="package_version") | .value) // "-",
+                (.attributes[]? | select(.key=="fix_available") | .value) // "-",
+                .uri
+              ]
+            ) | @tsv
+          ' | column -t -s$'\t'
+
+          echo ""
+          {
+            echo "## ECR Scan Findings — ${ECR_REPOSITORY}:${IMAGE_TAG}"
+            echo ""
+            echo "| Severity | CVE | Package | Installed | Fix Available | Reference |"
+            echo "|---|---|---|---|---|---|"
+            echo "$FINDINGS_JSON" | jq -r '
+              .imageScanFindings.findings[]? |
+              "| " + .severity + " | " + .name + " | " +
+              ((.attributes[]? | select(.key=="package_name") | .value) // "-") + " | " +
+              ((.attributes[]? | select(.key=="package_version") | .value) // "-") + " | " +
+              ((.attributes[]? | select(.key=="fix_available") | .value) // "-") + " | " +
+              "[link](" + .uri + ") |"
+            '
+          } >> "$GITHUB_STEP_SUMMARY"
 
           BLOCK=0
           for SEV in $FAIL_ON_SEVERITIES; do

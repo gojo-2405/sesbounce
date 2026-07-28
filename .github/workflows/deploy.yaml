@@ -3,6 +3,12 @@ name: Build, Scan & Deploy
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Optional note for why this manual run was triggered'
+        required: false
+        default: 'Manual run'
 
 # Required for OIDC — lets this workflow request a short-lived AWS token
 permissions:
@@ -11,10 +17,10 @@ permissions:
 
 env:
   AWS_REGION: eu-north-1
-  ECR_REPOSITORY: sesbounce
-  ECS_CLUSTER: dev
-  ECS_SERVICE: ses-bounce-service
-  ECS_TASK_FAMILY: ses-bounce
+  ECR_REPOSITORY: <your-ecr-repo-name>
+  ECS_CLUSTER: <your-ecs-cluster-name>
+  ECS_SERVICE: <your-ecs-service-name>
+  ECS_TASK_FAMILY: <your-task-family-name>
   FAIL_ON_SEVERITIES: "CRITICAL HIGH"
 
 jobs:

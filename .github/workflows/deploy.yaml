@@ -154,7 +154,7 @@ jobs:
               ) | @tsv
             ' | column -t -s$'\t'
           else
-            echo "(Basic scanning active — fix-version/CVSS need Enhanced Scanning. Descriptions below.)"
+            echo "(Basic scanning active — fix-version/CVSS need Enhanced Scanning. Full descriptions below.)"
             echo "$FINDINGS_JSON" | jq -r '
               ["SEVERITY","CVE","PACKAGE","INSTALLED","DESCRIPTION"],
               (.imageScanFindings.findings[]? |
@@ -167,6 +167,17 @@ jobs:
                 ]
               ) | @tsv
             ' | column -t -s$'\t'
+
+            echo ""
+            echo "=== Full Descriptions ==="
+            echo "$FINDINGS_JSON" | jq -r '
+              .imageScanFindings.findings[]? |
+              "\n--- " + .name + " (" + .severity + ") ---\n" +
+              "Package: " + ((.attributes[]? | select(.key=="package_name") | .value) // "-") +
+              "  Installed: " + ((.attributes[]? | select(.key=="package_version") | .value) // "-") + "\n" +
+              (.description // "n/a") + "\n" +
+              "Reference: " + .uri
+            '
           fi
 
           echo ""

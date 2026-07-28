@@ -17,10 +17,10 @@ permissions:
 
 env:
   AWS_REGION: eu-north-1
-  ECR_REPOSITORY: <your-ecr-repo-name>
-  ECS_CLUSTER: <your-ecs-cluster-name>
-  ECS_SERVICE: <your-ecs-service-name>
-  ECS_TASK_FAMILY: <your-task-family-name>
+  ECR_REPOSITORY: sesbounce
+  ECS_CLUSTER: dev
+  ECS_SERVICE: ses-bounce-service
+  ECS_TASK_FAMILY: ses-bounce
   FAIL_ON_SEVERITIES: "CRITICAL HIGH"
 
 jobs:

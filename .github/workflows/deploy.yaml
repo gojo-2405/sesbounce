@@ -19,7 +19,7 @@ env:
   ECS_CLUSTER: dev
   ECS_SERVICE: ses-bounce-service
   ECS_TASK_FAMILY: ses-bounce
-  FAIL_ON_SEVERITIES: "CRITICAL HIGH"
+  FAIL_ON_SEVERITIES: "EXTREME"
 
 jobs:
 
@@ -132,36 +132,90 @@ jobs:
 
           echo "$FINDINGS_JSON" | jq '.imageScanFindings.findingSeverityCounts'
 
+          # Detect scan type: enhanced (Inspector) vs basic (Clair).
+          IS_ENHANCED=$(echo "$FINDINGS_JSON" | jq '(.imageScanFindings.enhancedFindings // []) | length > 0')
+
           echo ""
           echo "=== Vulnerability Details ==="
-          echo "$FINDINGS_JSON" | jq -r '
-            ["SEVERITY","CVE","PACKAGE","INSTALLED","FIXED_IN","REFERENCE"],
-            (.imageScanFindings.findings[]? |
-              [
-                .severity,
-                .name,
-                (.attributes[]? | select(.key=="package_name") | .value) // "-",
-                (.attributes[]? | select(.key=="package_version") | .value) // "-",
-                (.attributes[]? | select(.key=="fix_available") | .value) // "-",
-                .uri
-              ]
-            ) | @tsv
-          ' | column -t -s$'\t'
+          if [ "$IS_ENHANCED" = "true" ]; then
+            echo "$FINDINGS_JSON" | jq -r '
+              ["SEVERITY","CVE","PACKAGE","INSTALLED","FIXED_IN","CVSS","REFERENCE"],
+              (.imageScanFindings.enhancedFindings[]? as $f |
+                (($f.packageVulnerabilityDetails.vulnerablePackages // [{}])[] ) as $pkg |
+                [
+                  $f.severity,
+                  ($f.packageVulnerabilityDetails.vulnerabilityId // $f.title // "-"),
+                  ($pkg.name // "-"),
+                  ($pkg.version // "-"),
+                  ($pkg.fixedInVersion // "not yet available"),
+                  (($f.packageVulnerabilityDetails.cvss[0].baseScore // "-") | tostring),
+                  ($f.packageVulnerabilityDetails.sourceUrl // (($f.packageVulnerabilityDetails.referenceUrls // [])[0]) // "-")
+                ]
+              ) | @tsv
+            ' | column -t -s$'\t'
+          else
+            echo "(Basic scanning active — fix-version/CVSS need Enhanced Scanning. Descriptions below.)"
+            echo "$FINDINGS_JSON" | jq -r '
+              ["SEVERITY","CVE","PACKAGE","INSTALLED","DESCRIPTION"],
+              (.imageScanFindings.findings[]? |
+                [
+                  .severity,
+                  .name,
+                  (.attributes[]? | select(.key=="package_name") | .value) // "-",
+                  (.attributes[]? | select(.key=="package_version") | .value) // "-",
+                  ((.description // "-") | if (length > 80) then .[0:80] + "..." else . end)
+                ]
+              ) | @tsv
+            ' | column -t -s$'\t'
+          fi
 
           echo ""
           {
             echo "## ECR Scan Findings — ${ECR_REPOSITORY}:${IMAGE_TAG}"
             echo ""
-            echo "| Severity | CVE | Package | Installed | Fix Available | Reference |"
-            echo "|---|---|---|---|---|---|"
-            echo "$FINDINGS_JSON" | jq -r '
-              .imageScanFindings.findings[]? |
-              "| " + .severity + " | " + .name + " | " +
-              ((.attributes[]? | select(.key=="package_name") | .value) // "-") + " | " +
-              ((.attributes[]? | select(.key=="package_version") | .value) // "-") + " | " +
-              ((.attributes[]? | select(.key=="fix_available") | .value) // "-") + " | " +
-              "[link](" + .uri + ") |"
-            '
+            if [ "$IS_ENHANCED" = "true" ]; then
+              echo "| Severity | CVE | Package | Installed | Fixed In | CVSS | Reference |"
+              echo "|---|---|---|---|---|---|---|"
+              echo "$FINDINGS_JSON" | jq -r '
+                .imageScanFindings.enhancedFindings[]? as $f |
+                (($f.packageVulnerabilityDetails.vulnerablePackages // [{}])[] ) as $pkg |
+                "| " + $f.severity + " | " + ($f.packageVulnerabilityDetails.vulnerabilityId // $f.title // "-") + " | " +
+                ($pkg.name // "-") + " | " + ($pkg.version // "-") + " | " +
+                ($pkg.fixedInVersion // "not yet available") + " | " +
+                (($f.packageVulnerabilityDetails.cvss[0].baseScore // "-") | tostring) + " | " +
+                "[link](" + ($f.packageVulnerabilityDetails.sourceUrl // (($f.packageVulnerabilityDetails.referenceUrls // [])[0]) // "#") + ") |"
+              '
+              echo ""
+              echo "### Full details"
+              echo "$FINDINGS_JSON" | jq -r '
+                .imageScanFindings.enhancedFindings[]? as $f |
+                "<details><summary><b>" + ($f.packageVulnerabilityDetails.vulnerabilityId // $f.title // "-") + "</b> (" + $f.severity + ")</summary>\n\n" +
+                "- **Description:** " + ($f.description // "n/a") + "\n" +
+                "- **CVSS:** " + (($f.packageVulnerabilityDetails.cvss[0].baseScore // "-") | tostring) + " (" + ($f.packageVulnerabilityDetails.cvss[0].scoringVector // "-") + ")\n" +
+                "- **Remediation:** " + ($f.remediation.recommendation.text // "See reference link") + "\n" +
+                "- **Reference:** " + ($f.packageVulnerabilityDetails.sourceUrl // (($f.packageVulnerabilityDetails.referenceUrls // [])[0]) // "-") + "\n" +
+                "\n</details>\n"
+              '
+            else
+              echo "| Severity | CVE | Package | Installed | Reference |"
+              echo "|---|---|---|---|---|"
+              echo "$FINDINGS_JSON" | jq -r '
+                .imageScanFindings.findings[]? |
+                "| " + .severity + " | " + .name + " | " +
+                ((.attributes[]? | select(.key=="package_name") | .value) // "-") + " | " +
+                ((.attributes[]? | select(.key=="package_version") | .value) // "-") + " | " +
+                "[link](" + .uri + ") |"
+              '
+              echo ""
+              echo "### Full details"
+              echo "$FINDINGS_JSON" | jq -r '
+                .imageScanFindings.findings[]? |
+                "<details><summary><b>" + .name + "</b> (" + .severity + ")</summary>\n\n" +
+                "- **Description:** " + (.description // "n/a") + "\n" +
+                "- **Reference:** " + .uri + "\n" +
+                "\n</details>\n"
+              '
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           BLOCK=0

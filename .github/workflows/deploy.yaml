@@ -8,11 +8,10 @@ on:
       reason:
         description: 'Optional note for why this manual run was triggered'
         required: false
-        default: 'Manual run'
+        default: 'Run'
 
-# Required for OIDC — lets this workflow request a short-lived AWS token
+# contents:read is enough now — id-token is only needed for OIDC
 permissions:
-  id-token: write
   contents: read
 
 env:
@@ -26,9 +25,6 @@ env:
 jobs:
   build-push-scan:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
     outputs:
       image_tag: ${{ steps.vars.outputs.image_tag }}
     steps:
@@ -39,22 +35,12 @@ jobs:
         id: vars
         run: echo "image_tag=${GITHUB_REF_NAME}-${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
-      # TEMPORARY DEBUG STEP — remove once the OIDC issue is confirmed fixed.
-      # Prints the exact 'sub'/'aud' claims GitHub is sending, so they can be
-      # compared character-for-character against the IAM role's trust policy.
-      - name: Debug OIDC token claims
-        run: |
-          curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | \
-            jq -r '.value' | cut -d. -f2 | base64 -d 2>/dev/null | jq '{sub, aud, repository, ref}'
-
-      # No AWS keys stored anywhere — this exchanges GitHub's OIDC token
-      # for short-lived AWS credentials scoped to the role above.
-      - name: Configure AWS credentials via OIDC
+      # Using static IAM access keys stored as repo secrets instead of OIDC.
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          role-session-name: github-actions-${{ github.run_id }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -142,18 +128,15 @@ jobs:
   deploy:
     needs: build-push-scan
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS credentials via OIDC
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          role-session-name: github-actions-${{ github.run_id }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy to ECS

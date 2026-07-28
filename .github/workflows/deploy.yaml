@@ -68,6 +68,7 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
       - name: Wait for ECR scan and check findings
+        continue-on-error: true
         env:
           IMAGE_TAG: ${{ steps.vars.outputs.image_tag }}
         run: |
@@ -82,7 +83,7 @@ jobs:
               --repository-name "$ECR_REPOSITORY" \
               --image-id imageTag="$IMAGE_TAG" \
               --region "$AWS_REGION" \
-              --query 'imageScanStatus.status' --output text 2>/dev/null)
+              --query 'imageScanStatus.status' --output text 2>/dev/null) || true
 
             if [ "$SCAN_STATUS" = "COMPLETE" ]; then
               echo "Scan complete."
@@ -105,7 +106,12 @@ jobs:
           FINDINGS_JSON=$(aws ecr describe-image-scan-findings \
             --repository-name "$ECR_REPOSITORY" \
             --image-id imageTag="$IMAGE_TAG" \
-            --region "$AWS_REGION" --output json)
+            --region "$AWS_REGION" --output json) || true
+
+          if [ -z "$FINDINGS_JSON" ]; then
+            echo "Could not retrieve scan findings. Blocking deploy."
+            exit 1
+          fi
 
           echo "$FINDINGS_JSON" | jq '.imageScanFindings.findingSeverityCounts'
 

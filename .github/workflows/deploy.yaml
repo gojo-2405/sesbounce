@@ -8,7 +8,7 @@ on:
       reason:
         description: 'Optional note for why this manual run was triggered'
         required: false
-        default: 'Run'
+        default: 'Manual run'
 
 # contents:read is enough now — id-token is only needed for OIDC
 permissions:
